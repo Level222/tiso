@@ -221,3 +221,7 @@ GNU_DATE=path/to/gnu_date shellspec
 ```shell
 shellcheck **/*.sh bin/*
 ```
+
+## License
+
+[MIT](./LICENSE)
