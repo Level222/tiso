@@ -1,0 +1,434 @@
+#!/bin/sh
+
+set -eu
+
+readonly VERSION=1.0.0
+
+mode=main
+format=extended
+date_mode=calendar
+unit=seconds
+precision=0
+decimal_separator=.
+time_zone=no
+utc=no
+time_zone_minus_sign=-
+no_new_line=false
+custom_date_command=""
+
+while getopts beCWOYmwdHMSp:0123456789fcizZluUs:nND:vh OPT; do
+  case $OPT in
+    b) format=basic ;;
+    e) format=extended ;;
+    C) date_mode=calendar ;;
+    W) date_mode=week ;;
+    O) date_mode=ordinal ;;
+    Y) unit=years ;;
+    m) unit=months ;;
+    w) unit=weeks ;;
+    d) unit=days ;;
+    H) unit=hours ;;
+    M) unit=minutes ;;
+    S) unit=seconds ;;
+    p) precision=$OPTARG ;;
+    0) precision=0 ;;
+    1) precision=1 ;;
+    2) precision=2 ;;
+    3) precision=3 ;;
+    4) precision=4 ;;
+    5) precision=5 ;;
+    6) precision=6 ;;
+    7) precision=7 ;;
+    8) precision=8 ;;
+    9) precision=9 ;;
+    f) decimal_separator=. ;;
+    c) decimal_separator=, ;;
+    i) time_zone=no ;;
+    z) time_zone=minutes ;;
+    Z) time_zone=hours ;;
+    l) utc=no ;;
+    u) utc=no_time_zone ;;
+    U) utc=time_zone ;;
+    s) time_zone_minus_sign=$OPTARG ;;
+    n) no_new_line=true ;;
+    N) no_new_line=false ;;
+    D) custom_date_command=$OPTARG ;;
+    v) mode=version ;;
+    h) mode=help ;;
+    *) mode=invalid_option ;;
+  esac
+done
+
+shift $((OPTIND - 1))
+
+if [ $mode = invalid_option ]; then
+  printf "View help: tiso -h\n" >&2
+  exit 1
+fi
+
+if [ $mode = version ]; then
+  printf "%s\n" $VERSION
+  exit 0
+fi
+
+if [ $mode = help ]; then
+  cat - <<HEREDOC
+Usage: tiso [options...]
+Display timestamp in ISO 8601 format.
+
+Options:
+  Format Type
+    -b               Use basic format
+    -e               Use extended format (default)
+
+  Dates Type
+    -C               Display calendar dates (default)
+    -W               Display week dates
+    -O               Display ordinal dates
+
+  Unit
+    -Y               Display in years
+    -m               Display in months
+    -w               Display in weeks
+    -d               Display in days
+    -H               Display in hours
+    -M               Display in minutes
+    -S               Display in seconds (default)
+
+  Decimal Fraction
+    -p <digits>      Specify decimal precision (default: 0)
+    -0, -1, ..., -9  Shortcut for precision
+    -f               Use a dot for the decimal separator (default)
+    -c               Use a comma for the decimal separator
+
+  Time Zone
+    -i               Do not show time zone (default)
+    -z               Show time zone in minutes
+    -Z               Show time zone in hours
+    -l               Do not set time zone to UTC (default)
+    -u               Set time zone to UTC
+    -U               Set time zone to UTC with 'Z' designator
+    -s <sign>        Specify the type of minus sign for the time zone (default: -)
+
+  Others
+    -n               Suppress new line
+    -N               Do not suppress new line (default)
+    -D <command>     Specify a custom date command
+
+  Utility
+    -v               Show version
+    -h               Show help
+
+Environments:
+  TZ  Set time zone if the -u or -U flag is not specified
+HEREDOC
+  exit 0
+fi
+
+if [ $format = basic ] && [ $unit = months ]; then
+  printf "In ISO 8601 basic format, only year and month are not allowed.\n" >&2
+  exit 1
+fi
+
+if [ $date_mode != calendar ] && [ $unit = months ]; then
+  printf "The months option is only valid with calendar dates mode.\n" >&2
+  exit 1
+fi
+
+if [ $date_mode != week ] && [ $unit = weeks ]; then
+  printf "The weeks option is only valid with week dates mode.\n" >&2
+  exit 1
+fi
+
+case "$precision" in "" | *[!0-9]*)
+  printf "Precision for decimal points must be a positive integer.\n" >&2
+  exit 1
+  ;;
+esac
+
+if [ $time_zone != no ] && [ $utc = time_zone ]; then
+  printf "UTC with time zone option cannot be used with time zone options.\n" >&2
+  exit 1
+fi
+
+if [ ${#time_zone_minus_sign} != 1 ]; then
+  printf "The type of minus sign for the time zone must be a single character.\n" >&2
+  exit 1
+fi
+
+# Determine date unit flags
+months=true
+weeks=true
+days=true
+
+case $unit in
+  years)
+    months=false
+    weeks=false
+    days=false
+    ;;
+  months)
+    days=false
+    ;;
+  weeks)
+    days=false
+    ;;
+esac
+
+# Determine the smallest time unit to be displayed
+time_unit_number=0
+
+case $unit in
+  hours) time_unit_number=1 ;;
+  minutes) time_unit_number=2 ;;
+  seconds) time_unit_number=3 ;;
+esac
+
+if [ "$precision" != 0 ] && [ $time_unit_number = 0 ]; then
+  printf "The precision option cannot be used with the option to display only dates.\n" >&2
+  exit 1
+fi
+
+# Date command wrapper
+date_wrapper_base=$(
+  if [ -n "$custom_date_command" ]; then
+    printf %s "$custom_date_command"
+  else
+    if command -v gdate >/dev/null 2>&1; then
+      printf gdate
+    else
+      printf date
+    fi
+  fi
+
+  if [ $utc != no ]; then
+    printf " -u"
+  fi
+)
+
+# Usage: date_wrapper [date_options...]
+date_wrapper() {
+  eval "$date_wrapper_base" "$(
+    for arg in "$@"; do
+      printf "%s " "$(printf %s "$arg" | sed "s/ /\\\\ /g")"
+    done
+  )"
+}
+
+# Get date components
+date_result=$(date_wrapper "+%d,%H,%j,%m,%M,%S,%u,%V,%Y")
+
+IFS=, read -r date_d date_H date_j date_m date_M date_S date_u date_V date_Y <<HEREDOC
+$date_result
+HEREDOC
+
+# Usage: <number> | trim_leading_zeros
+trim_leading_zeros() {
+  sed "s/^0*\(.\)/\1/"
+}
+
+# Usage: unixtime <date_command>
+unixtime() {
+  _unixtime_date_result=$(eval "$1" "+%Y,%m,%d,%H,%M,%S")
+
+  IFS=, read -r _unixtime_Y _unixtime_m _unixtime_d _unixtime_H _unixtime_M _unixtime_S <<HEREDOC
+$_unixtime_date_result
+HEREDOC
+
+  if [ "$_unixtime_m" -lt 3 ]; then
+    _unixtime_Y_temp=$(($(printf %s "$_unixtime_Y" | trim_leading_zeros) - 1))
+    _unixtime_m_temp=$(($(printf %s "$_unixtime_m" | trim_leading_zeros) + 12))
+  else
+    _unixtime_Y_temp=$(printf %s "$_unixtime_Y" | trim_leading_zeros)
+    _unixtime_m_temp=$(printf %s "$_unixtime_m" | trim_leading_zeros)
+  fi
+
+  printf %s "$(((\
+  365 * _unixtime_Y_temp + \
+  _unixtime_Y_temp / 4 - _unixtime_Y_temp / 100 + _unixtime_Y_temp / 400 + \
+  306 * (_unixtime_m_temp + 1) / 10 - 428 + \
+  $(printf %s "$_unixtime_d" | trim_leading_zeros) - 719163) * 86400 + \
+  $(printf %s "$_unixtime_H" | trim_leading_zeros) * 3600 + \
+  $(printf %s "$_unixtime_M" | trim_leading_zeros) * 60 + \
+  $(printf %s "$_unixtime_S" | trim_leading_zeros)))"
+}
+
+# Time zone calculation
+if [ $time_zone != no ]; then
+  if
+    date_z=$(date_wrapper +%z) 2>/dev/null &&
+      case $date_z in [+-][0-9][0-9][0-9][0-9]) true ;; *) false ;; esac
+  then
+    time_zone_signed_hours=$(printf %s "$date_z" | cut -c 1-3)
+    time_zone_minutes=$(printf %s "$date_z" | cut -c 4-5)
+  else
+    time_zone_in_minutes=$(
+      printf %.0f "$(
+        printf "scale=2; (%s - %s) / 60" "$(unixtime "date_wrapper")" "$(unixtime "date_wrapper -u")" |
+          bc
+      )"
+    )
+
+    time_zone_signed_hours=$(printf %+03d $((time_zone_in_minutes / 60)))
+    time_zone_minutes=$(printf %02d $((time_zone_in_minutes % 60)))
+  fi
+
+  if [ $time_zone = hours ] && [ "$time_zone_minutes" != 00 ]; then
+    printf "The hourly time zone option must be used in a time zone with 0 minutes.\n" >&2
+    exit 1
+  fi
+fi
+
+# Display date based on mode and unit
+if [ $date_mode = week ]; then
+  if [ "$date_V" = 01 ] && [ "$date_m" = 12 ]; then
+    printf %s $((date_Y + 1))
+  elif [ "$date_V" -ge 52 ] && [ "$date_m" = 01 ]; then
+    printf %s $((date_Y - 1))
+  else
+    printf %s "$date_Y"
+  fi
+else
+  printf %s "$date_Y"
+fi
+
+if [ $date_mode = calendar ] && [ $months = true ]; then
+  if [ $format = extended ]; then
+    printf %s -
+  fi
+
+  printf %s "$date_m"
+fi
+
+if [ $date_mode = week ] && [ $weeks = true ]; then
+  if [ $format = extended ]; then
+    printf %s -
+  fi
+
+  printf W%s "$date_V"
+fi
+
+if [ $days = true ]; then
+  if [ $format = extended ]; then
+    printf %s -
+  fi
+
+  case $date_mode in
+    calendar) printf %s "$date_d" ;;
+    week) printf %s "$date_u" ;;
+    ordinal) printf %s "$date_j" ;;
+  esac
+fi
+
+# Display time based on unit
+if [ $time_unit_number -ge 1 ]; then
+  printf T%s "$date_H"
+fi
+
+if [ $time_unit_number -ge 2 ]; then
+  if [ $format = extended ]; then
+    printf :
+  fi
+
+  printf %s "$date_M"
+fi
+
+if [ $time_unit_number -ge 3 ]; then
+  if [ $format = extended ]; then
+    printf :
+  fi
+
+  printf %s "$date_S"
+fi
+
+# Display precision
+if [ "$precision" -gt 0 ]; then
+  if
+    date_N=$(date_wrapper +%N) 2>/dev/null &&
+      [ "${#date_N}" = 9 ] &&
+      case "$date_N" in "" | *[!0-9]*) false ;; *) true ;; esac
+  then
+    decimals_calc_nanoseconds=$(printf %s "$date_N" | trim_leading_zeros)
+  else
+    decimals_calc_nanoseconds=0
+  fi
+
+  decimals_calc_seconds=$(
+    if [ $time_unit_number -le 2 ]; then
+      printf %s "$date_S" | trim_leading_zeros
+    else
+      printf 0
+    fi
+  )
+
+  decimals_calc_minutes=$(
+    if [ $time_unit_number -le 1 ]; then
+      printf %s "$date_M" | trim_leading_zeros
+    else
+      printf 0
+    fi
+  )
+
+  decimals_calc_total_nanoseconds=$((decimals_calc_nanoseconds + \
+    1000000000 * (decimals_calc_seconds + 60 * decimals_calc_minutes)))
+
+  nanoseconds_multiply=1000000000
+
+  seconds_multiply=$(
+    if [ $time_unit_number -le 2 ]; then
+      printf 60
+    else
+      printf 1
+    fi
+  )
+
+  minutes_multiply=$(
+    if [ $time_unit_number -le 1 ]; then
+      printf 60
+    else
+      printf 1
+    fi
+  )
+
+  total_multiply=$((nanoseconds_multiply * seconds_multiply * minutes_multiply))
+
+  decimals_formula="scale=$precision; $decimals_calc_total_nanoseconds / $total_multiply"
+
+  decimals_formula_result=$(
+    printf %s "$decimals_formula" |
+      bc |
+      tr -d "\n\\"
+  )
+
+  unpadded_decimals=${decimals_formula_result#*.}
+
+  padded_decimals=$(
+    printf %s%s "$unpadded_decimals" "$(printf "%*s" "$precision" "" | tr " " 0)" |
+      cut -c "1-$precision"
+  )
+
+  printf %s%s "$decimal_separator" "$padded_decimals"
+fi
+
+# Display time zone
+if [ $time_zone != no ]; then
+  printf %s "$time_zone_signed_hours" | tr - "$time_zone_minus_sign/"
+
+  if [ $time_zone = minutes ]; then
+    if [ $format = extended ]; then
+      printf :
+    fi
+
+    printf %s "$time_zone_minutes"
+  fi
+fi
+
+# Append 'Z' for UTC time zone
+if [ $utc = "time_zone" ]; then
+  printf Z
+fi
+
+# Append new line if required
+if [ $no_new_line = false ]; then
+  printf "\n"
+fi
