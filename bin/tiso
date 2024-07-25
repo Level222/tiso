@@ -410,7 +410,7 @@ fi
 
 # Display time zone
 if [ $time_zone != no ]; then
-  printf %s "$time_zone_signed_hours" | tr - "$time_zone_minus_sign/"
+  printf %s "$time_zone_signed_hours" | tr - "$time_zone_minus_sign"
 
   if [ $time_zone = minutes ]; then
     if [ $format = extended ]; then
