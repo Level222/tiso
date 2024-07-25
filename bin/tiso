@@ -193,12 +193,10 @@ fi
 date_wrapper_base=$(
   if [ -n "$custom_date_command" ]; then
     printf %s "$custom_date_command"
+  elif command -v gdate >/dev/null 2>&1; then
+    printf gdate
   else
-    if command -v gdate >/dev/null 2>&1; then
-      printf gdate
-    else
-      printf date
-    fi
+    printf date
   fi
 
   if [ $utc != no ]; then
