@@ -181,8 +181,8 @@ $ tiso -u
 $ tiso -U
 2012-03-04T17:34:56Z
 
-# U+2012 is MINUS SIGN
-$ tiso -s $'\u2012' -z
+# U+2212 is MINUS SIGN
+$ tiso -s $'\u2212' -z
 2012-03-04T12:34:56−05:00
 
 $ tiso -n
@@ -190,6 +190,10 @@ $ tiso -n
 
 $ tiso -D 'date -d "1972-12-16"'
 1972-12-16T00:00:00
+
+$ alias tiso_utc="tiso -U3"
+$ tiso_utc
+2012-03-04T17:34:56.123Z
 ```
 
 ## Development
