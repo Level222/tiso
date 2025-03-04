@@ -113,7 +113,7 @@ Describe 'tiso'
       End
 
       Context 'at the end of 2019'
-        It "should display 1st Thursday of 2020"
+        It "should display 1st Tuesday of 2020"
           When run source ./bin/tiso -D '"$current_gdate" -d 2019-12-31' -Wd
           The output should eq "2020-W01-2"
         End
